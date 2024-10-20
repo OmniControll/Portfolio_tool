@@ -2,7 +2,6 @@ import numpy as np
 import yfinance as yf
 from scipy.optimize import minimize
 import pandas as pd
-import matplotlib.pyplot as plt
 import plotly.express as px
 import os
 
@@ -13,7 +12,16 @@ import os
 
 def fetch_stock_data(tickers, start_date, end_date):
     stock_data = yf.download(tickers, start=start_date, end=end_date)['Adj Close']
+    print("Fetched Stock Data Summary:")
+    print(stock_data.describe())  # Debug: Print a summary of the fetched data to ensure it's complete
     return stock_data
+
+# Fetch benchmark data for comparison with the portfolio
+def fetch_benchmark_data(ticker='SPY', start_date=None, end_date=None):
+    """Fetches benchmark data for comparison."""
+    benchmark_data = yf.download(ticker, start=start_date, end=end_date)['Adj Close']
+    benchmark_returns = benchmark_data.pct_change().dropna()
+    return benchmark_returns.mean(), benchmark_returns.std()
 
 def calculate_monthly_returns(stock_data):
     """
@@ -28,13 +36,15 @@ def calculate_monthly_returns(stock_data):
     # Resample the data to monthly frequency ('M' stands for month-end) and calculate the percentage change
     monthly_stock_data = stock_data.resample('M').last()  # Take the last price of each month
     monthly_returns = monthly_stock_data.pct_change().dropna()  # Calculate the percentage change and drop NaN values
+    print("Monthly Returns Summary:")
+    print(monthly_returns.describe())  # Debug: Print a summary of the monthly returns
     return monthly_returns
 
-def calculate_expected_returns(daily_returns):
-    return daily_returns.mean()
+def calculate_expected_returns(monthly_returns):
+    return monthly_returns.mean()
 
-def calculate_covariance_matrix(daily_returns):
-    return daily_returns.cov()
+def calculate_covariance_matrix(monthly_returns):
+    return monthly_returns.cov()
 
 def calculate_portfolio_variance(weights, covariance_matrix):
     return np.dot(weights.T, np.dot(covariance_matrix, weights))
@@ -92,7 +102,7 @@ def optimize_sharpe_ratio(expected_returns, covariance_matrix, risk_free_rate):
     optimized_weights = minimize(objective_function, initial_weights, method='SLSQP', bounds=bounds, constraints=constraints)
     return optimized_weights.x
 
-def plot_efficient_frontier(results_df, plot_path=None):
+def plot_efficient_frontier(results_df, benchmark_return, benchmark_volatility, optimized_return, optimized_volatility, plot_path=None):
     # Format the weights and other metrics to reduce the number of decimal places and stack them vertically
     results_df['text'] = results_df.apply(
         lambda row: "<br>".join(
@@ -109,8 +119,28 @@ def plot_efficient_frontier(results_df, plot_path=None):
         color='sharpe_ratio',
         hover_data={'text': True},
         title='Efficient Frontier',
-        color_continuous_scale='viridis',
-        labels={'return': 'Monthly Returns', 'volatility': 'Volatility'}
+        color_continuous_scale='cividis',
+        labels={'return': 'Annual Returns', 'volatility': 'Annual Volatility'}
+    )
+    
+    # Highlight benchmark
+    fig.add_scatter(
+        x=[benchmark_volatility],
+        y=[benchmark_return],
+        mode='markers',
+        marker=dict(size=12, color='green', symbol='x'),
+        hovertemplate=f"<b>SPY Benchmark</b><br>Return: {benchmark_return:.2%}<br>Volatility: {benchmark_volatility:.2%}",
+        name="SPY Benchmark"
+    )
+    
+    # Highlight optimized portfolio
+    fig.add_scatter(
+        x=[optimized_volatility],
+        y=[optimized_return],
+        mode='markers',
+        marker=dict(size=12, color='red', symbol='star'),
+        hovertemplate=f"<b>Optimized Portfolio</b><br>Return: {optimized_return:.2%}<br>Volatility: {optimized_volatility:.2%}",
+        name="Optimized Portfolio"
     )
     
     fig.update_traces(marker=dict(size=7), selector=dict(mode='markers'))
@@ -124,9 +154,17 @@ def plot_efficient_frontier(results_df, plot_path=None):
     
     return plot_path
 
+# Plot the weight distribution for the optimized portfolio
+def plot_weight_distribution(optimized_weights):
+    """
+    Plots the asset weights of the optimized portfolio.
+    """
+    weight_df = pd.DataFrame.from_dict(optimized_weights, orient='index', columns=['Weight'])
+    fig = px.pie(weight_df, names=weight_df.index, values='Weight', title='Optimized Portfolio Asset Weights')
+    fig.show()
+
 # Now, let's run our functions to analyze and optimize our stock portfolio. We'll use a risk-free rate of 2%.
 # We also list the simulated portfolios by their Sharpe ratio in descending order and select the top 5.
-
 def analyze_stocks(tickers, start_date, end_date, num_portfolios, risk_free_rate, plot_path=None):
     stock_data = fetch_stock_data(tickers, start_date, end_date)
     monthly_returns = calculate_monthly_returns(stock_data)  # Use monthly returns now
@@ -137,12 +175,24 @@ def analyze_stocks(tickers, start_date, end_date, num_portfolios, risk_free_rate
     optimized_weights_list = optimized_weights_np.tolist()
     optimized_weights = dict(zip(tickers, optimized_weights_list))
     top_portfolios = monte_carlo_results.sort_values(by='sharpe_ratio', ascending=False).head(5)
-    weights_dict = dict(zip(tickers, optimized_weights))
+    
+    # Annualize monthly return and volatility
+    optimized_return = (1 + np.sum(optimized_weights_np * expected_returns)) ** 12 - 1
+    optimized_volatility = np.sqrt(np.dot(optimized_weights_np.T, np.dot(covariance_matrix, optimized_weights_np))) * np.sqrt(12)
+    
+    print("Optimized Return (Annualized):", optimized_return)  # Debug: Print the optimized annual return
+    print("Optimized Volatility (Annualized):", optimized_volatility)  # Debug: Print the optimized annual volatility
+    
+    # Fetch benchmark data
+    benchmark_return, benchmark_volatility = fetch_benchmark_data(start_date=start_date, end_date=end_date)
 
-    plot_path = plot_efficient_frontier(monte_carlo_results, plot_path)  # Save the figure
+    plot_path = plot_efficient_frontier(monte_carlo_results, benchmark_return, benchmark_volatility, optimized_return, optimized_volatility, plot_path)
+
+    # Plot the weight distribution of the optimized portfolio
+    plot_weight_distribution(optimized_weights)
 
     results = {
-        "optimized_weights": weights_dict,
+        "optimized_weights": optimized_weights,
         "top_portfolios": top_portfolios,
         "monte_carlo_results": monte_carlo_results,
         "plot_path": plot_path
@@ -150,22 +200,11 @@ def analyze_stocks(tickers, start_date, end_date, num_portfolios, risk_free_rate
     
     return results
 
-
-# Let's calculate the downside volatility. We need to replace the cases where returns exceeded the target return with 0,
-# because we only care about when returns were less than target.
-
-def calculate_downside_deviation(daily_returns, weights, target_return=0.0):
-    portfolio_returns = daily_returns.dot(weights)
-    downside_diff = target_return - portfolio_returns
-    downside_diff[downside_diff < 0] = 0
-    downside_deviation = np.sqrt(np.mean(np.square(downside_diff)))
-    
-    return downside_deviation
-
+# Main function to define parameters and run the analysis
 def main():
-    portfolio = ['BTC-USD', 'TSLA', 'AMD', 'MSFT', 'AMZN']  
-    start_date = '2020-01-01'
-    end_date = '2024-12-08'
+    portfolio = ['BTC-USD', 'TSLA','MSFT']  
+    start_date = '2022-01-01' # yyyy-dd-mm
+    end_date = '2024-12-10' # yyyy-dd-mm
     num_portfolios = 10000
     risk_free_rate = 0.02
 
