@@ -19,7 +19,9 @@ def fetch_benchmark_data(ticker='SPY', start_date=None, end_date=None):
     """Fetches benchmark data for comparison."""
     benchmark_data = yf.download(ticker, start=start_date, end=end_date)['Adj Close']
     benchmark_returns = benchmark_data.pct_change().dropna()
-    return benchmark_returns.mean() * 12, benchmark_returns.std() * np.sqrt(12)  # Annualize benchmark returns and volatility
+    annualized_return = (1 + benchmark_returns.mean()) ** 12 - 1  # Annualize using compounding
+    annualized_volatility = benchmark_returns.std() * np.sqrt(12)  # Annualize the volatility
+    return annualized_return, annualized_volatility
 
 def calculate_monthly_returns(stock_data):
     """
@@ -117,21 +119,27 @@ def plot_efficient_frontier(results_df, benchmark_return, benchmark_volatility, 
     results_df['text'] = results_df.apply(
         lambda row: "<br>".join(
             [f"{col.split('_')[1]}: {row[col]:.2f}" for col in results_df.columns if col.startswith('weight_')]
-        ) + f"<br>Return: {row['return']:.4f}<br>Volatility: {row['volatility']:.4f}<br>Sharpe Ratio: {row['sharpe_ratio']:.4f}",
+        ) + f"<br>Annual Return: {row['return']:.4f}<br>Annual Volatility: {row['volatility']:.4f}<br>Sharpe Ratio: {row['sharpe_ratio']:.4f}",
         axis=1
     )
+
     
     # Plot the data with hover text
     fig = px.scatter(
-        results_df,
-        x='volatility',
-        y='return',
-        color='sharpe_ratio',
-        hover_data={'text': True},
-        title='Efficient Frontier',
-        color_continuous_scale='cividis',
-        labels={'return': 'Annual Returns', 'volatility': 'Annual Volatility'}
-    )
+    results_df,
+    x='volatility',
+    y='return',
+    color='sharpe_ratio',
+    title='Efficient Frontier',
+    color_continuous_scale='cividis',
+    labels={'return': 'Annual Returns', 'volatility': 'Annual Volatility'}
+)
+
+# Update hover template to show custom text and remove redundant information
+    fig.update_traces(
+    hovertemplate='%{hovertext}',
+    hovertext=results_df['text']
+)
     
     # Highlight benchmark
     fig.add_scatter(
