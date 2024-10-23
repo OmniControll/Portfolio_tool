@@ -27,11 +27,6 @@ def calculate_monthly_returns(stock_data):
     """
     Calculates monthly returns from stock data.
 
-    Parameters:
-    - stock_data: DataFrame with stock prices
-
-    Returns:
-    - DataFrame of monthly returns
     """
     # Resample the data to monthly frequency ('M' stands for month-end) and calculate the percentage change
     monthly_stock_data = stock_data.resample('M').last()  # Take the last price of each month
@@ -43,11 +38,6 @@ def calculate_expected_returns(monthly_returns):
     """
     Calculates annualized expected returns using compounded monthly returns.
 
-    Parameters:
-    - monthly_returns: DataFrame of monthly returns
-
-    Returns:
-    - Series of annualized expected returns
     """
     # Calculate the mean of monthly returns, then compound to get the annualized return
     expected_returns = (1 + monthly_returns).prod() ** (12 / len(monthly_returns)) - 1  # Compounded annual returns formula
@@ -98,23 +88,28 @@ def monte_carlo_simulation(expected_returns, covariance_matrix, num_portfolios, 
 
 def optimize_sharpe_ratio(expected_returns, covariance_matrix, risk_free_rate):
     num_assets = len(expected_returns)
+
     # To calculate the optimized (maximized) Sharpe ratio, we need to minimize the negative of it.
     # The function below calculates the variance and return, then outputs the negated Sharpe ratio.
+
     def objective_function(weights):
         portfolio_variance = calculate_portfolio_variance(weights, covariance_matrix)
         expected_portfolio_return = np.sum(weights * expected_returns)
         neg_sharpe_ratio = - (expected_portfolio_return - risk_free_rate) / np.sqrt(portfolio_variance)
         return neg_sharpe_ratio
+    
     # We want only one constraint: the sum of the weights must equal 100%. We use a lambda with x as argument to represent the weights of our assets in the portfolio.
     constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
     # Bounds for each weight (0, 1)
     bounds = [(0, 1) for _ in range(num_assets)]
+
     # Starting point
     initial_weights = np.array([1 / num_assets] * num_assets)
     optimized_weights = minimize(objective_function, initial_weights, method='SLSQP', bounds=bounds, constraints=constraints)
     return optimized_weights.x
 
 def plot_efficient_frontier(results_df, benchmark_return, benchmark_volatility, optimized_return, optimized_volatility, plot_path=None):
+
     # Format the weights and other metrics to reduce the number of decimal places and stack them vertically
     results_df['text'] = results_df.apply(
         lambda row: "<br>".join(
@@ -205,7 +200,6 @@ def analyze_stocks(tickers, start_date, end_date, num_portfolios, risk_free_rate
 
     # Plot the weight distribution of the optimized portfolio
     plot_weight_distribution(optimized_weights)
-
     results = {
         "optimized_weights": optimized_weights,
         "top_portfolios": top_portfolios,
@@ -215,7 +209,7 @@ def analyze_stocks(tickers, start_date, end_date, num_portfolios, risk_free_rate
     
     return results
 
-# Main function to define parameters and run the analysis
+# Main function to define parameters
 def main():
     portfolio = ['BTC-USD','MSFT', 'COIN']
     start_date = '2022-01-01' # yyyy-dd-mm
@@ -236,6 +230,6 @@ def main():
 
     return results
 
-# Call the main function
+# Call main
 if __name__ == "__main__":
     main()
