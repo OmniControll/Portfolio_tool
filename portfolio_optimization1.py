@@ -12,8 +12,6 @@ import os
 
 def fetch_stock_data(tickers, start_date, end_date):
     stock_data = yf.download(tickers, start=start_date, end=end_date)['Adj Close']
-    print("Fetched Stock Data Summary:")
-    print(stock_data.describe())  # Debug: Print a summary of the fetched data to ensure it's complete
     return stock_data
 
 # Fetch benchmark data for comparison with the portfolio
@@ -21,7 +19,7 @@ def fetch_benchmark_data(ticker='SPY', start_date=None, end_date=None):
     """Fetches benchmark data for comparison."""
     benchmark_data = yf.download(ticker, start=start_date, end=end_date)['Adj Close']
     benchmark_returns = benchmark_data.pct_change().dropna()
-    return benchmark_returns.mean(), benchmark_returns.std()
+    return benchmark_returns.mean() * 12, benchmark_returns.std() * np.sqrt(12)  # Annualize benchmark returns and volatility
 
 def calculate_monthly_returns(stock_data):
     """
@@ -36,15 +34,27 @@ def calculate_monthly_returns(stock_data):
     # Resample the data to monthly frequency ('M' stands for month-end) and calculate the percentage change
     monthly_stock_data = stock_data.resample('M').last()  # Take the last price of each month
     monthly_returns = monthly_stock_data.pct_change().dropna()  # Calculate the percentage change and drop NaN values
-    print("Monthly Returns Summary:")
-    print(monthly_returns.describe())  # Debug: Print a summary of the monthly returns
+    
     return monthly_returns
 
 def calculate_expected_returns(monthly_returns):
-    return monthly_returns.mean()
+    """
+    Calculates annualized expected returns using compounded monthly returns.
+
+    Parameters:
+    - monthly_returns: DataFrame of monthly returns
+
+    Returns:
+    - Series of annualized expected returns
+    """
+    # Calculate the mean of monthly returns, then compound to get the annualized return
+    expected_returns = (1 + monthly_returns).prod() ** (12 / len(monthly_returns)) - 1  # Compounded annual returns formula
+    
+    return expected_returns
 
 def calculate_covariance_matrix(monthly_returns):
-    return monthly_returns.cov()
+    covariance_matrix = monthly_returns.cov() * 12  # Annualize the covariance matrix
+    return covariance_matrix
 
 def calculate_portfolio_variance(weights, covariance_matrix):
     return np.dot(weights.T, np.dot(covariance_matrix, weights))
@@ -63,19 +73,19 @@ def monte_carlo_simulation(expected_returns, covariance_matrix, num_portfolios, 
         weights = np.random.random(num_assets)
         weights /= np.sum(weights)
 
-        # Portfolio return (monthly return)
+        # Portfolio return (annualized)
         portfolio_return = np.sum(weights * expected_returns)
         
-        # Portfolio volatility (monthly volatility)
+        # Portfolio volatility (annualized)
         portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(covariance_matrix, weights)))
         
-        # Sharpe ratio (monthly return minus monthly risk-free rate, divided by monthly volatility)
-        sharpe_ratio = (portfolio_return - monthly_risk_free_rate) / portfolio_volatility
+        # Sharpe ratio (annual return minus annual risk-free rate, divided by annual volatility)
+        sharpe_ratio = (portfolio_return - annual_risk_free_rate) / portfolio_volatility
 
         # Store results
         results[i, 0:num_assets] = weights
-        results[i, num_assets] = portfolio_return  # Monthly return
-        results[i, num_assets + 1] = portfolio_volatility  # Monthly volatility
+        results[i, num_assets] = portfolio_return  # Annual return
+        results[i, num_assets + 1] = portfolio_volatility  # Annual volatility
         results[i, num_assets + 2] = sharpe_ratio
 
     # Create a DataFrame for the results
@@ -177,11 +187,8 @@ def analyze_stocks(tickers, start_date, end_date, num_portfolios, risk_free_rate
     top_portfolios = monte_carlo_results.sort_values(by='sharpe_ratio', ascending=False).head(5)
     
     # Annualize monthly return and volatility
-    optimized_return = (1 + np.sum(optimized_weights_np * expected_returns)) ** 12 - 1
-    optimized_volatility = np.sqrt(np.dot(optimized_weights_np.T, np.dot(covariance_matrix, optimized_weights_np))) * np.sqrt(12)
-    
-    print("Optimized Return (Annualized):", optimized_return)  # Debug: Print the optimized annual return
-    print("Optimized Volatility (Annualized):", optimized_volatility)  # Debug: Print the optimized annual volatility
+    optimized_return = np.sum(optimized_weights_np * expected_returns)
+    optimized_volatility = np.sqrt(np.dot(optimized_weights_np.T, np.dot(covariance_matrix, optimized_weights_np)))
     
     # Fetch benchmark data
     benchmark_return, benchmark_volatility = fetch_benchmark_data(start_date=start_date, end_date=end_date)
@@ -202,7 +209,7 @@ def analyze_stocks(tickers, start_date, end_date, num_portfolios, risk_free_rate
 
 # Main function to define parameters and run the analysis
 def main():
-    portfolio = ['BTC-USD', 'TSLA','MSFT']  
+    portfolio = ['BTC-USD','MSFT', 'COIN']
     start_date = '2022-01-01' # yyyy-dd-mm
     end_date = '2024-12-10' # yyyy-dd-mm
     num_portfolios = 10000
